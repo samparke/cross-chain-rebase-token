@@ -54,6 +54,7 @@ contract RebaseToken is ERC20 {
      * @param _amount the amount of tokens to burn
      */
     function burn(address _from, uint256 _amount) external {
+        // if they are sending their entire balance
         // mitigate against 'dust', commonly used by protocols
         if (_amount == type(uint256).max) {
             _amount = balanceOf(_from);
@@ -92,6 +93,52 @@ contract RebaseToken is ERC20 {
         return super.balanceOf(_user) * _calculateUserAccumulatedInterestSinceLastUpdate(_user) / PRECISION_FACTOR;
     }
 
+    /**
+     * @notice transfer tokens from user to another
+     * @param _recipient the user to transfer tokens to
+     * @param _amount the amount of tokens to transfer
+     * @return true if transfer was successful
+     */
+    function transfer(address _recipient, uint256 _amount) public override returns (bool) {
+        _mintAccruedInterest(msg.sender);
+        _mintAccruedInterest(_recipient);
+        // if they are sending their entire balance
+        if (_amount == type(uint256).max) {
+            _amount = balanceOf(msg.sender);
+        }
+        // if recipient has not used the protocol before, we set their interest rate to that of the msg.sender
+        if (balanceOf(_recipient) == 0) {
+            s_userInterestRate[_recipient] = s_userInterestRate[msg.sender];
+        }
+        return super.transfer(_recipient, _amount);
+    }
+
+    /**
+     * @notice transfer tokens from one user to another
+     * @param _sender the user to transfer tokens from
+     * @param _recipient the user to recieve tokens
+     * @param _amount the amount of tokens to transfer
+     * @return true if transfer was successful
+     */
+    function transferFrom(address _sender, address _recipient, uint256 _amount) public override returns (bool) {
+        _mintAccruedInterest(_sender);
+        _mintAccruedInterest(_recipient);
+        // if they are sending their entire balance
+        if (_amount == type(uint256).max) {
+            _amount = balanceOf(_sender);
+        }
+        // if recipient has not used the protocol before, we set their interest rate to that of the msg.sender
+        if (balanceOf(_recipient) == 0) {
+            s_userInterestRate[_recipient] = s_userInterestRate[_sender];
+        }
+        return super.transferFrom(_sender, _recipient, _amount);
+    }
+
+    /**
+     * @notice calculate the interest that has accumulated since the last update
+     * @param _user the user to calculate interest accumulated for
+     * @return linearInterest the interest that has accumulated since the last update
+     */
     function _calculateUserAccumulatedInterestSinceLastUpdate(address _user)
         internal
         view
