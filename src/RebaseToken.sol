@@ -12,6 +12,9 @@ contract RebaseToken is ERC20 {
     mapping(address => uint256) private s_userInterestRate;
     mapping(address => uint256) private s_userLastUpdatedTimestamp;
 
+    // this is 1 in 18 decimal precision
+    uint256 private constant PRECISION_FACTOR = 1e18;
+
     // EVENTS
     event ChangedInterestRate(uint256 newInterestRate);
 
@@ -46,16 +49,34 @@ contract RebaseToken is ERC20 {
     }
 
     /**
-     * @notice calculate the interest that has accumulated since the last update
-     * @param _user the user to calculate interest accumulated
+     * @notice burn the user tokens when they withdraw from the vault (if you are taking out your eth, we need to burn the rebase token you received)
+     * @param _from the user to burn the tokens from
+     * @param _amount the amount of tokens to burn
+     */
+    function burn(address _from, uint256 _amount) external {
+        // mitigate against 'dust', commonly used by protocols
+        if (_amount == type(uint256).max) {
+            _amount = balanceOf(_from);
+        }
+        _mintAccruedInterest(_from);
+        _burn(_from, _amount);
+    }
+
+    /**
+     * @notice mint the accrued interest to the user since the last time they interacted with the protocol (eg. burn, mint, transfer)
+     * @param _user to mint the accrued interest to
      */
     function _mintAccruedInterest(address _user) internal {
         // (1) find current balance of rebase tokens (principle balance)
+        uint256 previousPrincipleBalance = super.balanceOf(_user);
         // (2) calculate current balance, including any interest (balanceOf)
+        uint256 currentBalance = balanceOf(_user);
         // (2-1) calculate the number of tokens that need to be minted to user
-        // call _mint to mint the tokens to the user
+        uint256 balanceIncrease = currentBalance - previousPrincipleBalance;
         // set the users last updated timestamp
         s_userLastUpdatedTimestamp[_user] = block.timestamp;
+        // call _mint to mint the tokens to the user
+        _mint(_user, balanceIncrease);
     }
 
     /**
@@ -67,21 +88,30 @@ contract RebaseToken is ERC20 {
     function balanceOf(address _user) public view override returns (uint256) {
         // 'super.' avoids loop. Without it, it would call this function again, and again
         // since we want to call the ERC20 balanceOf, using super searches for this function in inherited contracts, and uses it
-        return super.balanceOf(_user) * _calculateUserAccumulatedInterestSinceLastUpdate(_user);
+        // also, because we are mutiplying precision factor by another precision factor, we need to divide to get it back to the normal precision factor
+        return super.balanceOf(_user) * _calculateUserAccumulatedInterestSinceLastUpdate(_user) / PRECISION_FACTOR;
     }
 
-    function _calculateUserAccumulatedInterestSinceLastUpdate(address _user) internal view returns (uint256) {
+    function _calculateUserAccumulatedInterestSinceLastUpdate(address _user)
+        internal
+        view
+        returns (uint256 linearInterest)
+    {
         // we need to calculate the interest that has accumulated since the last update
         // this is going to be linear growth
         // 1. calculate time since last updated
         // 2. calculate the amount of linear growth
 
-        // (principle amount) + principle amount + user interest rate + time elapsed
+        // principle amount (1 + (user interest rate * time elapsed)
         // example:
         // deposit: 10 tokens
         // interest rate: 0.5 tokens per second
         // time elapsed: 2 seconds
         // 10 + (10 * 0.5 * 2)
+        // the principle amount is the number of tokens that have actually been minted to them
+        uint256 timeElapsed = block.timestamp - s_userLastUpdatedTimestamp[_user];
+        // s_userInterestRate is in 18 decimal precision aleady, so we need to use PRECISION_FACTOR (1e18), instead of just 1
+        linearInterest = PRECISION_FACTOR + (s_userInterestRate[_user] * timeElapsed);
     }
 
     // GETTER FUNCTIONS
