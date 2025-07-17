@@ -2,8 +2,10 @@
 pragma solidity ^0.8.24;
 
 import {ERC20} from "openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {Ownable} from "openzeppelin/contracts/access/Ownable.sol";
+import {AccessControl} from "openzeppelin/contracts/access/AccessControl.sol";
 
-contract RebaseToken is ERC20 {
+contract RebaseToken is ERC20, Ownable, AccessControl {
     // ERROR
     error RebaseToken__InterestRateCanOnlyDecrease(uint256 oldInterestRate, uint256 newInterestRate);
 
@@ -14,18 +16,23 @@ contract RebaseToken is ERC20 {
 
     // this is 1 in 18 decimal precision
     uint256 private constant PRECISION_FACTOR = 1e18;
+    bytes32 private constant MINT_AND_BURN_ROLE = keccak256("MINT_AND_BURN_ROLE");
 
     // EVENTS
     event ChangedInterestRate(uint256 newInterestRate);
 
-    constructor() ERC20("Rebase Token", "RBT") {}
+    constructor() ERC20("Rebase Token", "RBT") Ownable(msg.sender) {}
+
+    function grantMintAndBurnRole(address _account) external onlyOwner {
+        _grantRole(MINT_AND_BURN_ROLE, _account);
+    }
 
     /**
      * @notice sets the interest rate for the contract
      * @param _newInterestRate is the new interest rate
      * @dev The interest rate can only decrease. Hence, revert if _newInterestRate > s_interestRate
      */
-    function setInterestRate(uint256 _newInterestRate) external {
+    function setInterestRate(uint256 _newInterestRate) external onlyOwner {
         if (_newInterestRate > s_interestRate) {
             revert RebaseToken__InterestRateCanOnlyDecrease(s_interestRate, _newInterestRate);
         }
@@ -38,7 +45,7 @@ contract RebaseToken is ERC20 {
      * @param _to The user to mint the tokens to
      * @param _amount The amount of tokens to mint
      */
-    function mint(address _to, uint256 _amount) external {
+    function mint(address _to, uint256 _amount) external onlyRole(MINT_AND_BURN_ROLE) {
         // before we set the users new interest rate, we want to mint according to their current interest rate
         // our protocol works so that whenever a user deposits, they get a new interest rate, even if this is less than their previous interest rate
         _mintAccruedInterest(_to);
@@ -53,7 +60,7 @@ contract RebaseToken is ERC20 {
      * @param _from the user to burn the tokens from
      * @param _amount the amount of tokens to burn
      */
-    function burn(address _from, uint256 _amount) external {
+    function burn(address _from, uint256 _amount) external onlyRole(MINT_AND_BURN_ROLE) {
         // if they are sending their entire balance
         // mitigate against 'dust', commonly used by protocols
         if (_amount == type(uint256).max) {
