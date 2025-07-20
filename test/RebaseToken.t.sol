@@ -9,6 +9,8 @@ import {IRebaseToken} from "../src/interfaces/IRebaseToken.sol";
 contract RebaseTokenTest is Test {
     RebaseToken private rebaseToken;
     Vault private vault;
+    // in a real world scenario, funds are unlikely to come from the owner (which is one of the purposes of the owner in these tests)
+    // instead, users funds are typically reinvested into other money-making protocols, which then funds the original protocol
     address public owner = makeAddr("owner");
     address public user = makeAddr("user");
 
@@ -19,8 +21,13 @@ contract RebaseTokenTest is Test {
         vault = new Vault(IRebaseToken(address(rebaseToken)));
         // giving vault access to mint and burn, due to role requirement we implemented
         rebaseToken.grantMintAndBurnRole(address(vault));
-        (bool success,) = payable(address(vault)).call{value: 1 ether}("");
         vm.stopPrank();
+    }
+
+    function addRewardsToVault(uint256 rewardAmount) public {
+        // side note: low level calls return a bool (indicating the success of the call) and bytes data
+        // (bool success,) means we only extract the success of the call
+        (bool success,) = payable(address(vault)).call{value: rewardAmount}("");
     }
 
     /**
@@ -75,5 +82,33 @@ contract RebaseTokenTest is Test {
         assertEq(rebaseToken.balanceOf(user), 0);
         assertEq(address(user).balance, amount);
         vm.stopPrank();
+    }
+
+    function testRedeemAfterTimePassed(uint256 depositAmount, uint256 time) public {
+        time = bound(time, 1000, type(uint96).max); // randomise time between 1000 seconds and a longer time
+        depositAmount = bound(depositAmount, 1e5, type(uint96).max);
+
+        // 1. deposit
+        vm.deal(user, depositAmount);
+        vm.prank(user);
+        vault.deposit{value: depositAmount}();
+
+        // 2. warp the time
+        vm.warp(block.timestamp + time);
+        uint256 balanceAfterSomeTime = rebaseToken.balanceOf(user);
+        // 2b. add the rewards to the vault
+        vm.deal(owner, balanceAfterSomeTime - depositAmount);
+        vm.prank(owner);
+        addRewardsToVault(balanceAfterSomeTime - depositAmount);
+
+        // 3. redeem
+        vm.prank(user);
+        vault.redeem(type(uint256).max);
+        uint256 ethBalance = address(user).balance;
+        // because we mint rebase tokens in the same quantity as we deposited,
+        // the eth balance after redeeming and rebase token balance before redeeming should be the same
+        assertEq(ethBalance, balanceAfterSomeTime);
+        // as time has passed, the final eth balance after redeeming our rebase tokens should be greater than the amount of eth we initially deposited
+        assertGt(ethBalance, depositAmount);
     }
 }
