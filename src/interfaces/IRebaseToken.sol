@@ -12,8 +12,6 @@ pragma solidity ^0.8.24;
  * The vault doesn't need access to all this other functionality, it only need access to mint and burn via the interface,
  * which then links to the rebase token containing this logic.
  * It's similar to using internal functions in a contract (in terms of modularity).
- *
- * Why do this:
  */
 interface IRebaseToken {
     function mint(address _to, uint256 _amount) external;

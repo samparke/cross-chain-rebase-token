@@ -10,12 +10,14 @@ contract RebaseToken is ERC20, Ownable, AccessControl {
     error RebaseToken__InterestRateCanOnlyDecrease(uint256 oldInterestRate, uint256 newInterestRate);
 
     // STATE VARIABLES
-    uint256 private s_interestRate = 5e10;
+
+    // instead of 5e10, we use this for more accurate precision (previous truncation)
+    uint256 private s_interestRate = (5 * PRECISION_FACTOR) / 1e8;
     mapping(address => uint256) private s_userInterestRate;
     mapping(address => uint256) private s_userLastUpdatedTimestamp;
 
     // this is 1 in 18 decimal precision
-    uint256 private constant PRECISION_FACTOR = 1e18;
+    uint256 private constant PRECISION_FACTOR = 1e27; // 10^27
     // hashes "MINT_AND_BURN_ROLE"
     bytes32 private constant MINT_AND_BURN_ROLE = keccak256("MINT_AND_BURN_ROLE");
 
