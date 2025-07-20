@@ -57,4 +57,23 @@ contract RebaseTokenTest is Test {
         assertApproxEqAbs(balanceAfterFirstWarp - startBalance, balanceAfterSecondWarp - balanceAfterFirstWarp, 1);
         vm.stopPrank();
     }
+
+    function testRedeemStraightAway(uint256 amount) public {
+        amount = bound(amount, 1e5, type(uint96).max);
+        // 1. deposit
+        vm.startPrank(user);
+        vm.deal(user, amount);
+        vault.deposit{value: amount}();
+        // when we call deposit, it mints the rebaseToken in the msg.value amount we sent to the function.
+        // the user should therefore have rebaseToken in amount quantitiy
+        assertEq(rebaseToken.balanceOf(user), amount);
+
+        // 2. redeem
+        // type(uint256).max is checked for in our burn function, which redeem() uses
+        // sets the amount to our entire balance
+        vault.redeem(type(uint256).max);
+        assertEq(rebaseToken.balanceOf(user), 0);
+        assertEq(address(user).balance, amount);
+        vm.stopPrank();
+    }
 }
