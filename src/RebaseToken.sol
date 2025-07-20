@@ -16,6 +16,7 @@ contract RebaseToken is ERC20, Ownable, AccessControl {
 
     // this is 1 in 18 decimal precision
     uint256 private constant PRECISION_FACTOR = 1e18;
+    // hashes "MINT_AND_BURN_ROLE"
     bytes32 private constant MINT_AND_BURN_ROLE = keccak256("MINT_AND_BURN_ROLE");
 
     // EVENTS
@@ -145,6 +146,13 @@ contract RebaseToken is ERC20, Ownable, AccessControl {
      * @notice calculate the interest that has accumulated since the last update
      * @param _user the user to calculate interest accumulated for
      * @return linearInterest the interest that has accumulated since the last update
+     *
+     * Why use internal functions?
+     * Internal functions are used for 'under-the-hood' calculations
+     * It seperates internal logic, such as the calculation of interest, from retreving the balanceOf a user
+     * Aside from better readability (not having incredibly long functions doing multiple things), its more modular.
+     * It can be easily called in seperate functions, without having to type it all out again.
+     * It' similar to using modifiers, such as creating onlyOwner, instead of repeatedly typing out "(if msg.sender!=owner...)"
      */
     function _calculateUserAccumulatedInterestSinceLastUpdate(address _user)
         internal
