@@ -142,8 +142,14 @@ contract RebaseTokenTest is Test {
         assertEq(userBalanceAfterTransfer, userBalance - amountToSend);
         assertEq(user2BalanceAfterTransfer, user2Balance + amountToSend);
 
-        // 3. check user 2 has inherited interest rate from user
+        // 3. check user 2 has inherited interest rate from user, remember everytime a user without previous interaction interacts, they inherit the other users interest rate
         assertEq(rebaseToken.getUserInterestRate(user), 5e10);
         assertEq(rebaseToken.getUserInterestRate(user2), 5e10);
+    }
+
+    function testCannotSetInterestRate(uint256 newInterestRate) public {
+        vm.prank(user);
+        vm.expectRevert();
+        rebaseToken.setInterestRate(newInterestRate);
     }
 }
