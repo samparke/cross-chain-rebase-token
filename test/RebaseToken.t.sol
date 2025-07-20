@@ -111,4 +111,39 @@ contract RebaseTokenTest is Test {
         // as time has passed, the final eth balance after redeeming our rebase tokens should be greater than the amount of eth we initially deposited
         assertGt(ethBalance, depositAmount);
     }
+
+    function testTransfer(uint256 amount, uint256 amountToSend) public {
+        amount = bound(amount, 1e5 + 1e5, type(uint96).max);
+        amountToSend = bound(amountToSend, 1e5, amount - 1e5);
+
+        // 1. deposit
+        vm.deal(user, amount);
+        vm.prank(user);
+        vault.deposit{value: amount}();
+
+        address user2 = makeAddr("user2");
+        uint256 userBalance = rebaseToken.balanceOf(user);
+        uint256 user2Balance = rebaseToken.balanceOf(user2);
+        // user should have balance because we minted with the address
+        assertEq(userBalance, amount);
+        // user 2 should have no rebase as they did not deposit collateral
+        assertEq(user2Balance, 0);
+
+        // owner reduces interest rate
+        vm.prank(owner);
+        rebaseToken.setInterestRate(4e10);
+
+        // 2. transfer
+        vm.prank(user);
+        rebaseToken.transfer(user2, amountToSend);
+        uint256 userBalanceAfterTransfer = rebaseToken.balanceOf(user);
+        uint256 user2BalanceAfterTransfer = rebaseToken.balanceOf(user2);
+
+        assertEq(userBalanceAfterTransfer, userBalance - amountToSend);
+        assertEq(user2BalanceAfterTransfer, user2Balance + amountToSend);
+
+        // 3. check user 2 has inherited interest rate from user
+        assertEq(rebaseToken.getUserInterestRate(user), 5e10);
+        assertEq(rebaseToken.getUserInterestRate(user2), 5e10);
+    }
 }
