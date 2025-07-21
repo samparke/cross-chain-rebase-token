@@ -5,6 +5,8 @@ import {Test, console} from "forge-std/Test.sol";
 import {RebaseToken} from "../src/RebaseToken.sol";
 import {Vault} from "../src/Vault.sol";
 import {IRebaseToken} from "../src/interfaces/IRebaseToken.sol";
+import {Ownable} from "openzeppelin/contracts/access/Ownable.sol";
+import {IAccessControl} from "openzeppelin/contracts/access/AccessControl.sol";
 
 contract RebaseTokenTest is Test {
     RebaseToken private rebaseToken;
@@ -28,6 +30,7 @@ contract RebaseTokenTest is Test {
         // side note: low level calls return a bool (indicating the success of the call) and bytes data
         // (bool success,) means we only extract the success of the call
         (bool success,) = payable(address(vault)).call{value: rewardAmount}("");
+        assertEq(success, true);
     }
 
     /**
@@ -149,7 +152,115 @@ contract RebaseTokenTest is Test {
 
     function testCannotSetInterestRate(uint256 newInterestRate) public {
         vm.prank(user);
-        vm.expectRevert();
+        vm.expectPartialRevert(Ownable.OwnableUnauthorizedAccount.selector);
         rebaseToken.setInterestRate(newInterestRate);
     }
+
+    function testCannotCallMintAndBurn() public {
+        vm.prank(user);
+        // we never granted the user permission to mint and burn through the grantMintAndBurn function
+        vm.expectPartialRevert(IAccessControl.AccessControlUnauthorizedAccount.selector);
+        rebaseToken.mint(user, 100);
+        vm.prank(user);
+        vm.expectPartialRevert(IAccessControl.AccessControlUnauthorizedAccount.selector);
+        rebaseToken.burn(user, 100);
+    }
+
+    function testgetPrincipleAmount(uint256 amount) public {
+        amount = bound(amount, 1e5, type(uint96).max);
+        vm.deal(user, amount);
+        vm.prank(user);
+        vault.deposit{value: amount}();
+        assertEq(rebaseToken.getPrincipleBalanceOf(user), amount);
+
+        vm.warp(1 hours);
+        assertEq(rebaseToken.getPrincipleBalanceOf(user), amount);
+    }
+
+    function testRebaseTokenAddress() public view {
+        assertEq(vault.getRebaseTokenAddress(), address(rebaseToken));
+    }
+
+    function testGetInterestRateForContract() public {
+        uint256 startingInterestRate = (5 * 1e18) / 1e8;
+        assertEq(rebaseToken.getInterestRateForContract(), startingInterestRate);
+
+        vm.prank(owner);
+        rebaseToken.setInterestRate(1);
+        uint256 endingInterestRate = 1;
+        assertEq(endingInterestRate, rebaseToken.getInterestRateForContract());
+    }
+
+    function testInterestRateCanOnlyDecreaseRevert(uint256 newInterestRate) public {
+        uint256 startingInterestRate = rebaseToken.getInterestRateForContract();
+        uint256 newInterestRate = bound(newInterestRate, startingInterestRate, type(uint96).max);
+        vm.prank(owner);
+        vm.expectPartialRevert(RebaseToken.RebaseToken__InterestRateCanOnlyDecrease.selector);
+        rebaseToken.setInterestRate(newInterestRate);
+        assertEq(startingInterestRate, rebaseToken.getInterestRateForContract());
+    }
+
+    function testTransferFromRecipientBalanceIncrease(uint256 amount, uint256 amountToSend) public {
+        amount = bound(amount, 1e5 + 1e5, type(uint96).max);
+        amountToSend = bound(amountToSend, 1e5, amount - 1e5);
+
+        vm.deal(user, amount);
+        vm.prank(user);
+        vault.deposit{value: amount}();
+
+        address user2 = makeAddr("user2");
+        uint256 userBalance = rebaseToken.balanceOf(user);
+        uint256 user2Balance = rebaseToken.balanceOf(user2);
+        assertEq(userBalance, amount);
+        assertEq(user2Balance, 0);
+
+        vm.prank(user);
+        rebaseToken.approve(address(this), amountToSend);
+        rebaseToken.transferFrom(user, user2, amountToSend);
+
+        uint256 endingUser2Balance = rebaseToken.balanceOf(user2);
+        assertEq(endingUser2Balance, amountToSend);
+    }
+
+    function testTransferUserFullBalanceIsMaxUint256(uint256 userBalance) public {
+        uint256 amount = type(uint256).max;
+        userBalance = bound(userBalance, 1e5, type(uint96).max);
+        vm.deal(user, userBalance);
+        vm.prank(user);
+        vault.deposit{value: userBalance}();
+
+        address user2 = makeAddr("user2");
+
+        vm.prank(user);
+        rebaseToken.transfer(user2, amount);
+        assertEq(rebaseToken.balanceOf(user2), userBalance);
+    }
+
+    function testTransferFromUserFullBalanceIsMaxUint256(uint256 userBalance) public {
+        uint256 amount = type(uint256).max;
+        userBalance = bound(userBalance, 1e5, type(uint96).max);
+
+        vm.deal(user, amount);
+        vm.prank(user);
+        vault.deposit{value: userBalance}();
+
+        address user2 = makeAddr("user2");
+
+        vm.prank(user);
+        rebaseToken.approve(address(this), amount);
+        rebaseToken.transferFrom(user, user2, amount);
+
+        assertEq(rebaseToken.balanceOf(user2), userBalance);
+    }
+
+    // function testRedeemFailed(uint256 amount, uint256 time) public {
+    //     amount = bound(amount, 1e5, type(uint96).max);
+    //     vm.startPrank(user);
+    //     vm.deal(user, amount);
+    //     vault.deposit{value: amount}();
+
+    //     vm.expectRevert();
+    //     vault.redeem(amount);
+    //     vm.stopPrank();
+    // }
 }
