@@ -160,7 +160,7 @@ contract RebaseTokenTest is Test {
         vm.prank(user);
         // we never granted the user permission to mint and burn through the grantMintAndBurn function
         vm.expectPartialRevert(IAccessControl.AccessControlUnauthorizedAccount.selector);
-        rebaseToken.mint(user, 100);
+        rebaseToken.mint(user, 100, 5);
         vm.prank(user);
         vm.expectPartialRevert(IAccessControl.AccessControlUnauthorizedAccount.selector);
         rebaseToken.burn(user, 100);
