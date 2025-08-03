@@ -193,7 +193,7 @@ contract RebaseTokenTest is Test {
 
     function testInterestRateCanOnlyDecreaseRevert(uint256 newInterestRate) public {
         uint256 startingInterestRate = rebaseToken.getInterestRateForContract();
-        uint256 newInterestRate = bound(newInterestRate, startingInterestRate, type(uint96).max);
+        newInterestRate = bound(newInterestRate, startingInterestRate, type(uint96).max);
         vm.prank(owner);
         vm.expectPartialRevert(RebaseToken.RebaseToken__InterestRateCanOnlyDecrease.selector);
         rebaseToken.setInterestRate(newInterestRate);
