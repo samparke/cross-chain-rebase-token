@@ -52,7 +52,13 @@ contract CrossChainTest is Test {
         TokenAdminRegistry(sepoliaNetworkDetails.tokenAdminRegistryAddress).setPool(
             address(sepoliaToken), address(sepoliaPool)
         );
-
+        configureTokenPool(
+            arbSepolia,
+            RebaseTokenPool(address(arbSepoliaPool)),
+            RebaseTokenPool(address(sepoliaPool)),
+            IRebaseToken(address(sepoliaToken)),
+            sepoliaNetworkDetails
+        );
         vm.stopPrank();
 
         // 2. deploy and configure on arbitrum sepolia
@@ -75,8 +81,17 @@ contract CrossChainTest is Test {
         TokenAdminRegistry(arbSepoliaNetworkDetails.tokenAdminRegistryAddress).setPool(
             address(arbSepoliaToken), address(arbSepoliaPool)
         );
+        configureTokenPool(
+            sepoliaFork,
+            RebaseTokenPool(address(sepoliaPool)),
+            RebaseTokenPool(address(arbSepoliaPool)),
+            IRebaseToken(address(arbSepoliaToken)),
+            arbSepoliaNetworkDetails
+        );
         vm.stopPrank();
     }
+
+    // newer chainlink ccip removed the requirement to pass a chain to remove, and instead implemented the bool allowed on your new chain
 
     function configureTokenPool(
         uint256 fork,
