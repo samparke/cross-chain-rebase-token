@@ -17,7 +17,7 @@ import {IRouterClient} from "ccip/contracts/src/v0.8/ccip/interfaces/IRouterClie
 
 contract CrossChainTest is Test {
     uint256 sepoliaFork;
-    uint256 arbSepolia;
+    uint256 arbSepoliaFork;
     CCIPLocalSimulatorFork ccipLocalSimulatorFork;
     RebaseToken sepoliaToken;
     RebaseToken arbSepoliaToken;
@@ -28,13 +28,15 @@ contract CrossChainTest is Test {
     RebaseTokenPool arbSepoliaPool;
     Register.NetworkDetails sepoliaNetworkDetails;
     Register.NetworkDetails arbSepoliaNetworkDetails;
+    uint256 public constant SEND_VALUE = 1e5;
 
     /**
      * @notice this set up first sets up the sepolia fork, switches to the arbitrum fork, and does the same
      */
     function setUp() public {
+        address[] memory allowList = new address[](0);
         sepoliaFork = vm.createSelectFork("sepolia-eth");
-        arbSepolia = vm.createFork("arb-sepolia");
+        arbSepoliaFork = vm.createFork("arb-sepolia");
 
         // deployment of ccip simulator, which mimicks the CCIP router, registries and cross-chain messaging behaviour
         ccipLocalSimulatorFork = new CCIPLocalSimulatorFork();
@@ -44,13 +46,15 @@ contract CrossChainTest is Test {
         // 1. deploy and configure on sepolia
         // becuase we are already on the sepolia chain, we get the network details for the current chain id
         sepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(block.chainid);
+        vm.makePersistent(sepoliaNetworkDetails.rmnProxyAddress);
+        vm.makePersistent(sepoliaNetworkDetails.routerAddress);
 
         vm.startPrank(owner);
         sepoliaToken = new RebaseToken();
         vault = new Vault(IRebaseToken(address(sepoliaToken)));
         sepoliaPool = new RebaseTokenPool(
             IERC20(address(sepoliaToken)),
-            new address[](0),
+            allowList,
             // retrieves rmnProxyAddress and routerAddress from the sepoliaNetworkDetails
             sepoliaNetworkDetails.rmnProxyAddress,
             sepoliaNetworkDetails.routerAddress
@@ -68,25 +72,20 @@ contract CrossChainTest is Test {
         TokenAdminRegistry(sepoliaNetworkDetails.tokenAdminRegistryAddress).setPool(
             address(sepoliaToken), address(sepoliaPool)
         );
-
-        // switching to setting up arbitrum
-        configureTokenPool(
-            arbSepolia, /* the fork we are switching to */
-            RebaseTokenPool(address(arbSepoliaPool)), /* the associated with arbitrum */
-            RebaseTokenPool(address(sepoliaPool)), /* once we are on arbitrum, the sepolia pool is the destination pool */
-            IRebaseToken(address(sepoliaToken)), /* the token associated with the destination pool */
-            sepoliaNetworkDetails /* the network details for the destination network */
-        );
         vm.stopPrank();
+        // switching to setting up arbitrum
 
         // 2. deploy and configure on arbitrum sepolia
-        vm.selectFork(arbSepolia);
+        vm.selectFork(arbSepoliaFork);
         vm.startPrank(owner);
         arbSepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(block.chainid);
+        vm.makePersistent(arbSepoliaNetworkDetails.rmnProxyAddress);
+        vm.makePersistent(arbSepoliaNetworkDetails.routerAddress);
+
         arbSepoliaToken = new RebaseToken();
         arbSepoliaPool = new RebaseTokenPool(
             IERC20(address(arbSepoliaToken)),
-            new address[](0),
+            allowList,
             arbSepoliaNetworkDetails.rmnProxyAddress,
             arbSepoliaNetworkDetails.routerAddress
         );
@@ -99,18 +98,18 @@ contract CrossChainTest is Test {
         TokenAdminRegistry(arbSepoliaNetworkDetails.tokenAdminRegistryAddress).setPool(
             address(arbSepoliaToken), address(arbSepoliaPool)
         );
-        configureTokenPool(
-            sepoliaFork,
-            RebaseTokenPool(address(sepoliaPool)),
-            RebaseTokenPool(address(arbSepoliaPool)),
-            IRebaseToken(address(arbSepoliaToken)),
-            arbSepoliaNetworkDetails
-        );
         vm.stopPrank();
     }
 
-    // newer chainlink ccip removed the requirement to pass a chain to remove, and instead implemented the bool allowed on your new chain
-
+    /**
+     * @notice this function configures the fork that you are switching to. Unlike older version, where you had to remove a chain first, newer versions
+     * just requires you to add a chain, and clarify whether it is allowed via bool allowed
+     * @param fork the fork we are switching to
+     * @param localPool the local pool we call the applyChainUpdates to
+     * @param remotePool the remote pool of the destination fork
+     * @param remoteToken the remote token of the destination fork
+     * @param remoteNetworkDetails the network details of the destination fork
+     */
     function configureTokenPool(
         uint256 fork,
         TokenPool localPool,
@@ -134,6 +133,16 @@ contract CrossChainTest is Test {
         vm.stopPrank();
     }
 
+    /**
+     * @notice this function bridges the tokens
+     * @param amountToBridge the amount of local tokens we want to bridge
+     * @param localFork the fork we are sending from
+     * @param remoteFork the destination fork
+     * @param localNetworkDetails the details of our current fork, such as the router address assigned to that fork
+     * @param remoteNetworkDetails the details of the destination fork, such as the chain selector on that fork
+     * @param localToken the local token we are sending, such as Sepolia. This will be the token being locked or burned
+     * @param remoteToken the token we are receiving, such as Arbitrum Sepolia. This will be the token being released or minted
+     */
     function bridgeTokens(
         uint256 amountToBridge,
         uint256 localFork,
@@ -144,38 +153,83 @@ contract CrossChainTest is Test {
         RebaseToken remoteToken
     ) public {
         vm.selectFork(localFork);
-
+        // we declare the token amounts we want to send, specifying the specific token (localToken) and the amount (amountToBridge)
         Client.EVMTokenAmount[] memory tokenAmounts = new Client.EVMTokenAmount[](1);
         tokenAmounts[0] = Client.EVMTokenAmount({token: address(localToken), amount: amountToBridge});
+        // we create the message (as requested by EVMAnyMessage function)
         Client.EVM2AnyMessage memory message = Client.EVM2AnyMessage({
             receiver: abi.encode(user),
             data: "",
             tokenAmounts: tokenAmounts,
             feeToken: localNetworkDetails.linkAddress,
-            extraArgs: Client._argsToBytes(Client.EVMExtraArgsV1({gasLimit: 0}))
+            extraArgs: ""
         });
-
+        // the fee has to be calculated after the message is created
         uint256 fee =
             IRouterClient(localNetworkDetails.routerAddress).getFee(remoteNetworkDetails.chainSelector, message);
+        // as this is a simulation, we then request funding (in LINK) from the ccip faucet
         ccipLocalSimulatorFork.requestLinkFromFaucet(user, fee);
+
         vm.prank(user);
+        // from the user, we grant the router address access to our link we just gained (for the fee amount)
+        // this allows the ccip router to take our fee
         IERC20((localNetworkDetails.linkAddress)).approve(localNetworkDetails.routerAddress, fee);
         vm.prank(user);
+        // we then allow the router to take our local token in the amountToBridge
+        // this allows the ccip router to take our tokens are bridge them
         IERC20(address(localToken)).approve(localNetworkDetails.routerAddress, amountToBridge);
         uint256 localBalanceBefore = localToken.balanceOf(user);
         vm.prank(user);
+        // from the router client, we are sending the remote network the message (which contains our tokens to send etc)
         IRouterClient(localNetworkDetails.routerAddress).ccipSend(remoteNetworkDetails.chainSelector, message);
         uint256 localBalanceAfter = localToken.balanceOf(user);
         assertEq(localBalanceAfter, localBalanceBefore - amountToBridge);
         uint256 localUserInterestRate = localToken.getUserInterestRate(user);
 
+        // we are only switching forks here to check the user balance before routing message
         vm.selectFork(remoteFork);
         vm.warp(block.timestamp + 20 minutes);
         uint256 remoteBalanceBefore = remoteToken.balanceOf(user);
+
+        vm.selectFork(localFork);
         ccipLocalSimulatorFork.switchChainAndRouteMessage(remoteFork);
         uint256 remoteBalanceAfter = remoteToken.balanceOf(user);
         assertEq(remoteBalanceAfter, remoteBalanceBefore + amountToBridge);
         uint256 remoteUserInterestRate = remoteToken.getUserInterestRate(user);
         assertEq(remoteUserInterestRate, localUserInterestRate);
+    }
+
+    function testBridgeAllTokens() public {
+        configureTokenPool(
+            sepoliaFork,
+            RebaseTokenPool(address(sepoliaPool)),
+            RebaseTokenPool(address(arbSepoliaPool)),
+            IRebaseToken(address(arbSepoliaToken)),
+            arbSepoliaNetworkDetails
+        );
+
+        configureTokenPool(
+            arbSepoliaFork, /* the fork we are switching to */
+            RebaseTokenPool(address(arbSepoliaPool)), /* the associated with arbitrum */
+            RebaseTokenPool(address(sepoliaPool)), /* once we are on arbitrum, the sepolia pool is the destination pool */
+            IRebaseToken(address(sepoliaToken)), /* the token associated with the destination pool */
+            sepoliaNetworkDetails /* the network details for the destination network */
+        );
+
+        vm.selectFork(sepoliaFork);
+        vm.deal(user, SEND_VALUE);
+        vm.prank(user);
+        Vault(payable(address(vault))).deposit{value: SEND_VALUE}();
+        // after depositing eth, the vault mints sepolia tokens
+        assertEq(sepoliaToken.balanceOf(user), SEND_VALUE);
+        bridgeTokens(
+            SEND_VALUE,
+            sepoliaFork,
+            arbSepoliaFork,
+            sepoliaNetworkDetails,
+            arbSepoliaNetworkDetails,
+            sepoliaToken,
+            arbSepoliaToken
+        );
     }
 }
