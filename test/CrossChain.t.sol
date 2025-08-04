@@ -207,6 +207,7 @@ contract CrossChainTest is Test {
      * and then call out bridgeTokens function to send them across to arbSepolia
      */
     function testBridgeAllTokens() public {
+        // these functions configure each token pool on each fork. we do this on each test before carrying out interactions
         configureTokenPool(
             sepoliaFork,
             RebaseTokenPool(address(sepoliaPool)),
@@ -216,11 +217,11 @@ contract CrossChainTest is Test {
         );
 
         configureTokenPool(
-            arbSepoliaFork, /* the fork we are switching to */
-            RebaseTokenPool(address(arbSepoliaPool)), /* the associated with arbitrum */
-            RebaseTokenPool(address(sepoliaPool)), /* once we are on arbitrum, the sepolia pool is the destination pool */
-            IRebaseToken(address(sepoliaToken)), /* the token associated with the destination pool */
-            sepoliaNetworkDetails /* the network details for the destination network */
+            arbSepoliaFork,
+            RebaseTokenPool(address(arbSepoliaPool)),
+            RebaseTokenPool(address(sepoliaPool)),
+            IRebaseToken(address(sepoliaToken)),
+            sepoliaNetworkDetails
         );
 
         vm.selectFork(sepoliaFork);
@@ -249,5 +250,59 @@ contract CrossChainTest is Test {
             arbSepoliaToken,
             sepoliaToken
         );
+    }
+
+    function testBridgeTokensToAndThenBackAndThenTo() public {
+        configureTokenPool(
+            sepoliaFork,
+            RebaseTokenPool(address(sepoliaPool)),
+            RebaseTokenPool(address(arbSepoliaPool)),
+            IRebaseToken(address(arbSepoliaToken)),
+            arbSepoliaNetworkDetails
+        );
+
+        configureTokenPool(
+            arbSepoliaFork,
+            RebaseTokenPool(address(arbSepoliaPool)),
+            RebaseTokenPool(address(sepoliaPool)),
+            IRebaseToken(address(sepoliaToken)),
+            sepoliaNetworkDetails
+        );
+
+        vm.selectFork(sepoliaFork);
+        vm.deal(user, SEND_VALUE);
+        vm.prank(user);
+        Vault(payable(address(vault))).deposit{value: SEND_VALUE}();
+        assertEq(sepoliaToken.balanceOf(user), SEND_VALUE);
+
+        bridgeTokens(
+            SEND_VALUE,
+            sepoliaFork,
+            arbSepoliaFork,
+            sepoliaNetworkDetails,
+            arbSepoliaNetworkDetails,
+            sepoliaToken,
+            arbSepoliaToken
+        );
+
+        vm.selectFork(arbSepoliaFork);
+        vm.warp(block.timestamp + 20 minutes);
+        uint256 userArbSepoliaBalance = arbSepoliaToken.balanceOf(user);
+        assertApproxEqAbs(userArbSepoliaBalance, SEND_VALUE, 6);
+
+        vm.prank(user);
+        bridgeTokens(
+            arbSepoliaToken.balanceOf(user),
+            arbSepoliaFork,
+            sepoliaFork,
+            arbSepoliaNetworkDetails,
+            sepoliaNetworkDetails,
+            arbSepoliaToken,
+            sepoliaToken
+        );
+
+        vm.selectFork(sepoliaFork);
+        vm.warp(block.timestamp + 20 minutes);
+        assertApproxEqAbs(sepoliaToken.balanceOf(user), userArbSepoliaBalance, 6);
     }
 }
