@@ -162,6 +162,7 @@ contract CrossChainTest is Test {
             data: "",
             tokenAmounts: tokenAmounts,
             feeToken: localNetworkDetails.linkAddress,
+            // previously, you had to declare a gas limit. I originally set it to 100_000, which failed due to it ending up using around 140_000
             extraArgs: ""
         });
         // the fee has to be calculated after the message is created
@@ -199,6 +200,12 @@ contract CrossChainTest is Test {
         assertEq(remoteUserInterestRate, localUserInterestRate);
     }
 
+    /**
+     * @notice this function tests our bridging token functionality
+     * @dev we begin by configuring each token pool on each fork
+     * we pretend we are on our local fork (sepolia), deposit eth and receive sepolia tokens
+     * and then call out bridgeTokens function to send them across to arbSepolia
+     */
     function testBridgeAllTokens() public {
         configureTokenPool(
             sepoliaFork,
@@ -230,6 +237,17 @@ contract CrossChainTest is Test {
             arbSepoliaNetworkDetails,
             sepoliaToken,
             arbSepoliaToken
+        );
+        vm.selectFork(arbSepoliaFork);
+        vm.warp(block.timestamp + 20 minutes);
+        bridgeTokens(
+            arbSepoliaToken.balanceOf(user),
+            arbSepoliaFork,
+            sepoliaFork,
+            arbSepoliaNetworkDetails,
+            sepoliaNetworkDetails,
+            arbSepoliaToken,
+            sepoliaToken
         );
     }
 }
