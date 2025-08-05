@@ -166,18 +166,15 @@ contract CrossChainTest is Test {
             extraArgs: ""
         });
         // the fee has to be calculated after the message is created
+        uint256 fee =
+            IRouterClient(localNetworkDetails.routerAddress).getFee(remoteNetworkDetails.chainSelector, message);
         // as this is a simulation, we then request funding (in LINK) from the ccip faucet
-        ccipLocalSimulatorFork.requestLinkFromFaucet(
-            user, IRouterClient(localNetworkDetails.routerAddress).getFee(remoteNetworkDetails.chainSelector, message)
-        );
+        ccipLocalSimulatorFork.requestLinkFromFaucet(user, fee);
 
         vm.prank(user);
         // from the user, we grant the router address access to our link we just gained (for the fee amount)
         // this allows the ccip router to take our fee
-        IERC20((localNetworkDetails.linkAddress)).approve(
-            localNetworkDetails.routerAddress,
-            IRouterClient(localNetworkDetails.routerAddress).getFee(remoteNetworkDetails.chainSelector, message)
-        );
+        IERC20((localNetworkDetails.linkAddress)).approve(localNetworkDetails.routerAddress, fee);
         vm.prank(user);
         // we then allow the router to take our local token in the amountToBridge
         // this allows the ccip router to take our tokens are bridge them
@@ -188,19 +185,15 @@ contract CrossChainTest is Test {
         IRouterClient(localNetworkDetails.routerAddress).ccipSend(remoteNetworkDetails.chainSelector, message);
         uint256 localBalanceAfter = localToken.balanceOf(user);
         assertEq(localBalanceAfter, localBalanceBefore - amountToBridge);
-        // uint256 localUserInterestRate = localToken.getUserInterestRate(user);
 
         // we are only switching forks here to check the user balance before routing message
         vm.selectFork(remoteFork);
-        // vm.warp(block.timestamp + 20 minutes);
+        vm.warp(block.timestamp + 20 minutes);
         uint256 remoteBalanceBefore = remoteToken.balanceOf(user);
 
         vm.selectFork(localFork);
         ccipLocalSimulatorFork.switchChainAndRouteMessage(remoteFork);
-        uint256 remoteBalanceAfter = remoteToken.balanceOf(user);
-        assertEq(remoteBalanceAfter, remoteBalanceBefore + amountToBridge);
-        // uint256 remoteUserInterestRate = remoteToken.getUserInterestRate(user);
-        // assertEq(remoteUserInterestRate, localUserInterestRate);
+        assertEq(remoteToken.balanceOf(user), remoteBalanceBefore + amountToBridge);
     }
 
     /**
